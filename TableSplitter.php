@@ -61,26 +61,46 @@ class TableSplitter
      */
     public function createMonochromeImage($gd)
     {
-        $monochromed_gd = imagecreate(imagesx($gd), imagesy($gd));
-        for ($x = imagesx($gd); $x--;) {
-            for ($y = imagesy($gd); $y--;) {
-                $rgb = imagecolorat($gd, $x, $y);
-                $colors = imagecolorsforindex($gd, $rgb);
-                $gray = ($colors['red'] + $colors['green'] + $colors['blue']) / 3;
-                if ($colors['alpha'] == 127 or $gray < 180) {
-                    imagesetpixel($monochromed_gd, $x, $y, 0x000000);
-                } else {
-                    imagesetpixel($monochromed_gd, $x, $y, 0xFFFFFF);
+        $start = microtime(true);
+        $this->debug_log('monochrome start');
+
+        $width = imagesx($gd);
+        $height = imagesy($gd);
+
+        if (true) {
+            $monochromed_gd = imagecreatetruecolor($width, $height);
+            for ($x = $width; $x--;) {
+                for ($y = $height; $y--;) {
+                    $rgb = imagecolorat($gd, $x, $y);
+                    $colors = imagecolorsforindex($gd, $rgb);
+                    $gray = ($colors['red'] + $colors['green'] + $colors['blue']) / 3;
+                    if ($colors['alpha'] == 127 or $gray < 180) {
+                        imagesetpixel($monochromed_gd, $x, $y, 0x000000);
+                    } else {
+                        imagesetpixel($monochromed_gd, $x, $y, 0xFFFFFF);
+                    }
                 }
             }
+        } else {
+            $tmp_gd = imagecreatetruecolor($width, $height);
+            imagecopy($tmp_gd, $gd, 0, 0, 0, 0, $width, $height);
+            imagefilter($tmp_gd, IMG_FILTER_GRAYSCALE); //first, convert to grayscale 
+            imagefilter($tmp_gd, IMG_FILTER_CONTRAST, -255); //then, apply a full contrast 
+            $monochromed_gd = imagecreatetruecolor($width, $height);
+            imagecopy($monochromed_gd, $tmp_gd, 0, 0, 0, 0, $width, $height);
+            imagedestroy($tmp_gd);
         }
+        $delta = microtime(true) - $start;
+        $this->debug_log("monochrome end, spent: $delta");
         return $monochromed_gd;
     }
 
     public function isColor($gd, $x, $y, $color)
     {
         $rgb = imagecolorat($gd, $x, $y);
-        $colors = imagecolorsforindex($gd, $rgb);
+        if (!$colors = imagecolorsforindex($gd, $rgb)) {
+            throw new Exception("imagecolorallocate failed");
+        }
 
         switch ($color) {
         case 'blue':
@@ -192,9 +212,7 @@ class TableSplitter
     public function splitReductionPrintImage($gd, $rows, $cols)
     {
         // 轉成只有黑跟白
-        $this->debug_log('monochrome start');
-        $monochromed_gd = $table_splitter->monochromeImage($gd);
-        $this->debug_log('monochrome end');
+        $monochromed_gd = $this->createMonochromeImage($gd);
 
         $ret = array(
             "found_rects" => array(),
@@ -304,7 +322,7 @@ class TableSplitter
                 if ($this->_debug) {
                     imagepng($monochromed_gd, 'tmp.png');
                 }
-                $ret["found_rects"] = $rect;
+                $ret["found_rects"][] = $rect;
 
                 imagerectangle($monochromed_gd, $rect['x'], $rect['y'], $rect['x'] + $rect['width'], $rect['y'] + $rect['height'], $blue);
                 foreach (array($left_top, $left_bottom, $right_top, $right_bottom) as $point) {
