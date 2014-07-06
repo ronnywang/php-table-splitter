@@ -226,8 +226,8 @@ class TableSplitter
         $height = imagesy($gd);
 
         $prev_x = array();
-        foreach (range(0, $rows) as $y_pos) {
-            foreach (range(0, $cols) as $x_pos) {
+        foreach (range(0, $rows - 1) as $y_pos) {
+            foreach (range(0, $cols - 1) as $x_pos) {
                 $this->debug_log("Finding [$x_pos, $y_pos]");
                 $max_point = null;
                 $max_count = 0;
