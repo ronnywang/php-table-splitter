@@ -19,6 +19,97 @@ class TableSplitter
         return $gd;
     }
 
+    /**
+     * 找出所有垂直線和水平線的交點
+     * 
+     * @param array $verticles
+     * @param array $horizons 
+     * @access public
+     * @return array 所有交點的二維陣列
+     */
+    public function getCrossPoints($verticles, $horizons)
+    {
+        $points = array();
+
+        foreach ($verticles as $i => $vertice_line) {
+            $points[$i] = array();
+
+            foreach ($horizons as $j => $horizon_line) {
+                // x + a1 * y = b1
+                // x + a2 * y = b2
+                // => y = (b1 - b2) / (a1 - a2)
+                // => x = b1 - a1 * y = b1 - a1 * (b1 - b2) / (a1 - a2) 
+                // r = x * cosθ+ y * sinθ
+                // => x + (sinθ/ cosθ) * y = r / cosθ
+
+                $a1 = sin($vertice_line->theta) / cos($vertice_line->theta);
+                $b1 = $vertice_line->r / cos($vertice_line->theta);
+
+                $a2 = sin($horizon_line->theta) / cos($horizon_line->theta);
+                $b2 = $horizon_line->r / cos($horizon_line->theta);
+
+                $y = floor(($b1 - $b2) / ($a1 - $a2));
+                $x = floor($b1 - $a1 * $y);
+
+                $points[$i][$j] = array($x, $y);
+            }
+        }
+
+        return $points;
+    }
+
+    public function scaleCrossPoints($i_j_points, $scale)
+    {
+        $ret = array();
+        foreach ($i_j_points as $i => $j_points) {
+            $ret[$i] = array();
+            foreach ($j_points as $j => $points) {
+                $ret[$i][$j] = array(
+                    floor($points[0] * $scale),
+                    floor($points[1] * $scale),
+                );
+            }
+        }
+        return $ret;
+    }
+
+    protected $line_groups = array();
+
+    public function addLine($group, $r, $theta, $width, $height)
+    {
+        if (!array_key_exists($group, $this->line_groups)) {
+            $this->line_groups[$group] = array();
+        }
+        $line = array();
+        $line[] = $theta;
+        $line[] = $r;
+
+        // 把 theta 和 r 接近的 group 在一起，允許誤差值如下
+        $theta_threshold = 0.03;
+        $r_threshold = 0.01;
+        // 找到了，這個 function 就結束了直接 return
+        foreach ($this->line_groups[$group] as $id => $line_group) {
+            if (floatval(abs($line_group->theta - $theta)) / pi() > $theta_threshold or (floatval(abs($line_group->r - $r)) / max($width, $height)) > $r_threshold) {
+                continue;
+            }
+            $line_group->count ++;
+            $line_group->theta_sum += $theta;
+            $line_group->r_sum += $r;
+            $line_group->theta = $line_group->theta_sum / $line_group->count;
+            $line_group->r = $line_group->r_sum / $line_group->count;
+            $this->line_groups[$group][$id] = $line_group;
+            return;
+        }
+
+        // 找不到的話就在 line_group 新增一條線
+        $obj = new StdClass;
+        $obj->count = 1;
+        $obj->theta_sum = $obj->theta = $theta;
+        $obj->r_sum = $obj->r = $r;
+        $this->line_groups[$group][] = $obj;
+    }
+
+
     public function countRed($gd, $width, $height, $center_x, $center_y)
     {
         for ($i = 1; true; $i ++) {
@@ -182,6 +273,7 @@ class TableSplitter
             if ($count > $max_count) {
                 $max_count = $count;
                 $answer = array(
+                    'r' => $r,
                     'theta' => $theta,
                     'score' => $max_count,
                     'points' => $max_point,
@@ -198,6 +290,152 @@ class TableSplitter
         }
     }
 
+    public function findCellsFromImage($gd)
+    {
+        // 先縮到最大邊 2000 加快速度
+        $height = imagesy($gd);
+        $width = imagesx($gd);
+        $scale = 2000.0 / max($width, $height);
+        $resized_gd = imagecreatetruecolor(floor($width * $scale), floor($height * $scale));
+        imagecopyresized($resized_gd, $gd, 0, 0, 0, 0, floor($width * $scale), floor($height * $scale), $width, $height);
+
+        // 轉成只有黑跟白
+        $monochromed_gd = $this->createMonochromeImage($resized_gd);
+        imagedestroy($resized_gd);
+
+        $width = imagesx($monochromed_gd);
+        $height = imagesy($monochromed_gd);
+
+        $red = imagecolorallocate($monochromed_gd, 255, 0, 0);
+        $green = imagecolorallocate($monochromed_gd, 0, 255, 0);
+        $black = imagecolorallocate($monochromed_gd, 0, 0, 0);
+        $white = imagecolorallocate($monochromed_gd, 255, 255, 255);
+
+        // 如果最上面或是最下面就是黑色，表示可能是影印造成的問題，就把他給濾掉
+        if ($this->isColor($monochromed_gd, floor($width / 2), 0, 'black')) {
+            imagefill($monochromed_gd, floor($width / 2), 0, $white);
+        }
+        if ($this->isColor($monochromed_gd, floor($width / 2), $height - 1, 'black')) {
+            imagefill($monochromed_gd, floor($width / 2), $height - 1, $white);
+        }
+
+        // 從圖正中間往下畫一條垂直線
+        $max_count = 0;
+        $max_point = array();
+
+        $x = floor($width / 2);
+        for ($i = 0; $i < $height; $i ++) {
+            $y = $i;
+
+            if ($this->isColor($monochromed_gd, $x, $y, 'white')) {
+                continue;
+            }
+            if ($this->isColor($monochromed_gd, $x, $y, 'green')) {
+                continue;
+            }
+
+            // 遇到了把他填滿成紅色
+            imagefill($monochromed_gd, $x, $y, $red);
+
+            // 掃一遍看看總共有多少 pixel 變成紅色
+            $count = $this->countRed($monochromed_gd, $width, $height, $x, $y);
+            error_log($y . ' ' . $count);
+
+            if ($count > $max_count) {
+                if ($max_point) {
+                    imagefill($monochromed_gd, $max_point[0], $max_point[1], $white);
+                }
+                $max_count = $count;
+                $max_point = array($x, $y);
+                imagefill($monochromed_gd, $x, $y, $green);
+            } else {
+                imagefill($monochromed_gd, $x, $y, $white);
+            }
+        }
+
+        list($top_x, $top_y) = $max_point;
+        // 剛剛上面的 $max_point 是交點，來找跟交點連接的線條
+        // 因為遇到的應該是接近水平線
+        // 因此以 0度 => 1度 => -1度 => 2度 => -2度 的順序去比對，應該可以最快找到
+        $angle_base = array(-2, 2, 1000);
+        for ($check_y = $top_y; $check_y < $height; $check_y ++ ) {
+            if (!$this->isColor($monochromed_gd, $top_x, $check_y, 'green')) {
+                continue;
+            }
+            $ret = $this->searchLineFromPoint($monochromed_gd, $top_x, $check_y, $angle_base[0], $angle_base[1], $angle_base[2]);
+            $points = $ret['points'];
+            $length = pow(pow($points[0][0] - $points[1][0], 2) + pow($points[0][1] - $points[1][1], 2), 0.5);
+            // 找到的線條在 50px 以下就跳過
+            if ($length < 50) {
+                continue;
+            }
+            $this->debug_log("Found Horizon line, length = {$length}, ({$points[0][0]}, {$points[0][1]}) - ({$points[1][0]}, {$points[1][1]})");
+            #imageline($monochromed_gd, $points[0][0], $points[0][1], $points[1][0], $points[1][1], $red);
+            #imagepng($monochromed_gd, 'tmp.png');
+            // 找到的話就跳過 20px 再往下找
+            $bottom_y = $check_y;
+            $check_y += 20;
+
+            // 找到的話，下一條就只需要從這一條的角度的 加減 0.1 度範圍來找就好了
+            $angle = rad2deg($ret['theta']) - 90;
+            $angle_base = array($angle - 0.1, $angle + 0.1, 20);
+            $this->addLine('horizons', $ret['r'], $ret['theta'], $width, $height);
+        }
+
+        // 接下來處理垂直線，上面的 $top_y 是表格最上端， $bottom_y 是表格最下端
+        // 所以從 ($top_y + $bottom_y) / 2 高度的地方從左射出一條水平射線
+        // 理論上就可以對到所有的垂直線..那就跟上面做法一樣了
+        $angle_base = array(88, 92, 1000);
+        $middle_y = floor(($top_y + $bottom_y) / 2);
+        for ($check_x = 0; $check_x < $width; $check_x ++) {
+            if (!$this->isColor($monochromed_gd, $check_x, $middle_y, 'green')) {
+                continue;
+            }
+            $ret = $this->searchLineFromPoint($monochromed_gd, $check_x, $middle_y, $angle_base[0], $angle_base[1], $angle_base[2]);
+            $points = $ret['points'];
+            $length = pow(pow($points[0][0] - $points[1][0], 2) + pow($points[0][1] - $points[1][1], 2), 0.5);
+            // 找到的線條在 50px 以下就跳過
+            if ($length < 50) {
+                continue;
+            }
+            $this->debug_log("Found Verticle Line, length = {$length}, ({$points[0][0]}, {$points[0][1]}) - ({$points[1][0]}, {$points[1][1]})");
+            #imageline($monochromed_gd, $points[0][0], $points[0][1], $points[1][0], $points[1][1], $red);
+            #imagepng($monochromed_gd, 'tmp.png');
+            // 找到的話就跳過 20px 再往下找
+            $check_x += 20;
+
+            // 找到的話，下一條就只需要從這一條的角度的 加減 0.1 度範圍來找就好了
+            $angle = rad2deg($ret['theta']) - 90;
+            $angle_base = array($angle - 0.1, $angle + 0.1, 100);
+            $this->addLine('verticles', $ret['r'], $ret['theta'], $width, $height);
+        }
+
+        if (!$this->line_groups['verticles']) {
+            throw new Exception("not found");
+        }
+
+        // 看看水平線是不是等距
+        //$this->fixHorizons();
+        $cross_points = $this->getCrossPoints($this->line_groups['verticles'], $this->line_groups['horizons']);
+        foreach ($cross_points as $line_cross_points) {
+            foreach ($line_cross_points as $cross_point) {
+                imageellipse($monochromed_gd, $cross_point[0], $cross_point[1], 20, 20, $red);
+            }
+        }
+        $cross_points = $this->scaleCrossPoints($cross_points, 1.0 / $scale);
+
+        imagepng($monochromed_gd, 'tmp.png');
+        imagedestroy($monochromed_gd);
+
+        $ret = new stdClass;
+        $ret->width = $width;
+        $ret->height = $height;
+        $ret->horizons = $this->line_groups['horizons'];
+        $ret->verticles = $this->line_groups['verticles'];
+        $ret->cross_points = $cross_points;
+        return $ret;
+    }
+        
     /**
      * Split reduction print image with border
      * 
