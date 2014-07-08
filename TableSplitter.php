@@ -224,6 +224,9 @@ class TableSplitter
         for ($i = 1; $i < $angle_chunk; $i ++) {
             $angle = $angle_mid + $angle_delta * floor($i / 2) * ($i % 2 ? 1 : -1);
             $theta = deg2rad($angle + 90);
+            if ($theta > pi()) {
+                $theta -= pi();
+            }
             $r = ($top_y * sin($theta) + $top_x * cos($theta));
             $count = 0;
             $max_point[0] = $max_point[1] = array($top_x, $top_y);
@@ -398,15 +401,15 @@ class TableSplitter
             if ($length < 50) {
                 continue;
             }
-            $this->debug_log("Found Verticle Line, length = {$length}, ({$points[0][0]}, {$points[0][1]}) - ({$points[1][0]}, {$points[1][1]})");
+            $this->debug_log("Found Verticle Line, length = {$length}, ({$points[0][0]}, {$points[0][1]}) - ({$points[1][0]}, {$points[1][1]}), theta={$ret['theta']}");
             #imageline($monochromed_gd, $points[0][0], $points[0][1], $points[1][0], $points[1][1], $red);
             #imagepng($monochromed_gd, 'tmp.png');
             // 找到的話就跳過 20px 再往下找
             $check_x += 20;
 
             // 找到的話，下一條就只需要從這一條的角度的 加減 0.1 度範圍來找就好了
-            $angle = rad2deg($ret['theta']) - 90;
-            $angle_base = array($angle - 0.1, $angle + 0.1, 100);
+            $angle = 90 + rad2deg($ret['theta']);
+            $angle_base = array($angle - 0.1, $angle + 0.1, 20);
             $this->addLine('verticles', $ret['r'], $ret['theta'], $width, $height);
         }
 
