@@ -390,7 +390,7 @@ class TableSplitter
         // 理論上就可以對到所有的垂直線..那就跟上面做法一樣了
         $angle_base = array(88, 92, 1000);
         $middle_y = floor(($top_y + $bottom_y) / 2);
-        for ($check_x = 0; $check_x < $width; $check_x ++) {
+        for ($check_x = $width - 1; $check_x >= 0; $check_x --) {
             if (!$this->isColor($monochromed_gd, $check_x, $middle_y, 'green')) {
                 continue;
             }
@@ -405,8 +405,7 @@ class TableSplitter
             #imageline($monochromed_gd, $points[0][0], $points[0][1], $points[1][0], $points[1][1], $red);
             #imagepng($monochromed_gd, 'tmp.png');
             // 找到的話就跳過 20px 再往下找
-            $check_x += 20;
-
+            $check_x -= 20;
             // 找到的話，下一條就只需要從這一條的角度的 加減 0.1 度範圍來找就好了
             $angle = 90 + rad2deg($ret['theta']);
             $angle_base = array($angle - 0.1, $angle + 0.1, 20);
@@ -416,6 +415,8 @@ class TableSplitter
         if (!$this->line_groups['verticles']) {
             throw new Exception("not found");
         }
+        // 反序過來
+        $this->line_groups['verticles'] = array_reverse($this->line_groups['verticles']);
 
         // 看看水平線是不是等距
         //$this->fixHorizons();
